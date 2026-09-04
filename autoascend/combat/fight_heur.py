@@ -4,7 +4,7 @@ from itertools import product
 import numpy as np
 from scipy import signal
 
-from ..glyph import G, MON
+from ..glyph import G
 from ..utils import adjacent
 from .monster_utils import is_monster_faster, is_dangerous_monster, \
     ONLY_RANGED_SLOW_MONSTERS, EXPLODING_MONSTERS, WEAK_MONSTERS, consider_melee_only_ranged_if_hp_full
@@ -198,32 +198,18 @@ def get_potential_wand_usages(agent, monsters, dy, dx):
     return ret
 
 
-def _ignores_elbereth(mon):
-    # humans (including were-creatures in @ form and shopkeepers) and minotaurs
-    # are not scared by Elbereth
-    try:
-        if ord(mon.mlet) == MON.S_HUMAN:
-            return True
-    except TypeError:
-        pass
-    return mon.mname == 'minotaur'
-
-
 def elbereth_action(agent, monsters):
     if agent.inventory.engraving_below_me.lower() == 'elbereth':
         return []
     if not agent.can_engrave():
         return []
     adj_monsters_count = 0
-    adj_ignoring_elbereth = False
     for monster in monsters:
         _, my, mx, mon, _ = monster
         if mon.mname in ONLY_RANGED_SLOW_MONSTERS:
             continue
         if not adjacent((my, mx), (agent.blstats.y, agent.blstats.x)):
             continue
-        if _ignores_elbereth(mon):
-            adj_ignoring_elbereth = True
         multiplier = np.clip(20 / agent.blstats.hitpoints, 1.0, 1.5)
         if is_monster_faster(agent, monster):
             multiplier *= 2
@@ -233,14 +219,6 @@ def elbereth_action(agent, monsters):
         adj_monsters_count += 1 * multiplier
         if is_dangerous_monster(monster):
             adj_monsters_count += 2 * multiplier
-
-    # hypothesis (continued): at critically low HP the melee priority (up to ~17)
-    # always outbid Elbereth, so the bot traded hits until it died even against
-    # monsters that Elbereth would scare away. When HP is critical and every
-    # adjacent attacker respects Elbereth, engraving must win outright.
-    if adj_monsters_count > 0 and not adj_ignoring_elbereth and \
-            agent.blstats.hitpoints <= max(6, agent.blstats.max_hitpoints // 3):
-        return [(25, ('elbereth',))]
 
     player_hp_ratio = (agent.blstats.hitpoints / agent.blstats.max_hitpoints) ** 0.5
     if agent.blstats.hitpoints < 30 and adj_monsters_count > 0:

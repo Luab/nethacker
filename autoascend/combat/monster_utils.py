@@ -15,25 +15,27 @@ def is_monster_faster(agent, monster):
 
 
 def imminent_death_on_melee(agent, monster):
+    # hypothesis: the bot fights to the death because it only retreats at a
+    # flat HP <= 8 (or <= 16 for a handful of "dangerous" monsters). Scale the
+    # retreat threshold with the monster's difficulty (a rough proxy for its
+    # damage output) and the player's max HP, so the bot disengages before a
+    # couple of hits can kill it instead of trading blows down to single-digit HP.
+    _, y, x, mon, _ = monster
+    threat = max(1, getattr(mon, 'difficulty', 1))
+    danger_hp = max(agent.blstats.max_hitpoints // 4, threat * 3)
     if is_dangerous_monster(monster):
-        return agent.blstats.hitpoints <= 16
-    return agent.blstats.hitpoints <= 8
+        danger_hp = max(danger_hp, agent.blstats.max_hitpoints // 3)
+    return agent.blstats.hitpoints <= danger_hp
 
 
 def is_dangerous_monster(monster):
-    # hypothesis: the baseline's deaths (rothe x2, werejackal, mumak, elf zombie,
-    # small mimic, ...) are exactly the monsters excluded from this list, so
-    # imminent_death_on_melee never fires for them and the bot melees them at
-    # <=16 HP instead of retreating, engraving Elbereth, or throwing daggers.
-    # Restoring the classification should let the low-HP avoidance logic keep
-    # the character alive longer, raising both Xp and depth milestones.
     _, y, x, mon, _ = monster
     is_pet = 'dog' in mon.mname or 'cat' in mon.mname or 'kitten' in mon.mname or 'pony' in mon.mname \
              or 'horse' in mon.mname
-    is_hard_hitter = 'mumak' in mon.mname or 'orc' in mon.mname or 'rothe' in mon.mname \
-        or 'were' in mon.mname or 'unicorn' in mon.mname or 'elf' in mon.mname or 'leocrotta' in mon.mname \
-        or 'mimic' in mon.mname
-    return is_pet or is_hard_hitter or mon.mname in INSECTS
+    # 'mumak' in mon.mname or 'orc' in mon.mname or 'rothe' in mon.mname \
+    # or 'were' in mon.mname or 'unicorn' in mon.mname or 'elf' in mon.mname or 'leocrotta' in mon.mname \
+    # or 'mimic' in mon.mname
+    return is_pet or mon.mname in INSECTS
 
 
 def consider_melee_only_ranged_if_hp_full(agent, monster):

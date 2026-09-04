@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import queue
+import sys
 import threading
 import traceback
 from collections.abc import Mapping
@@ -137,3 +138,8 @@ class AutoAscendDriver:
             pass
         except BaseException:
             self._thread_error = traceback.format_exc(limit=20)[-8_000:]
+            # Say so: `act` falls back to ESC from here on, so the game idles
+            # to a one-turn zero -- without this line a broken edit looks like a
+            # bot that "completed" with progress 0 and no explanation.
+            print(f"[arena_adapter] AutoAscend crashed; the bot will idle:\n{self._thread_error}",
+                  file=sys.stderr, flush=True)
