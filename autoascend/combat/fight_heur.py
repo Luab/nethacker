@@ -4,7 +4,7 @@ from itertools import product
 import numpy as np
 from scipy import signal
 
-from ..glyph import G, MON
+from ..glyph import G
 from ..utils import adjacent
 from .monster_utils import is_monster_faster, is_dangerous_monster, \
     ONLY_RANGED_SLOW_MONSTERS, EXPLODING_MONSTERS, WEAK_MONSTERS, consider_melee_only_ranged_if_hp_full
@@ -198,15 +198,48 @@ def get_potential_wand_usages(agent, monsters, dy, dx):
     return ret
 
 
-def _ignores_elbereth(mon):
-    # humans (including were-creatures in @ form and shopkeepers) and minotaurs
-    # are not scared by Elbereth
-    try:
-        if ord(mon.mlet) == MON.S_HUMAN:
-            return True
-    except TypeError:
-        pass
-    return mon.mname == 'minotaur'
+def get_potential_spell_usages(agent, monsters, dy, dx):
+    """ Return list of (priority, ('cast', dy, dx, spell_name)) actions for
+    known attack spells that can hit a monster in the given direction. """
+    ret = []
+    attack_spells = agent.character.get_attack_spells()
+    if not attack_spells:
+        return ret
+
+    y, x = agent.blstats.y, agent.blstats.x
+    while True:
+        y += dy
+        x += dx
+        if not 0 <= y < agent.glyphs.shape[0] or not 0 <= x < agent.glyphs.shape[1]:
+            return ret
+        if agent.glyphs[y, x] in G.PETS or not agent.current_level().walkable[y, x]:
+            return ret
+        if agent.glyphs[y, x] in G.MONS:
+            monster = [m for m in monsters if m[1] == y and m[2] == x]
+            if not monster:
+                # there is a monster that shouldn't be attacked
+                return ret
+            assert len(monster) == 1
+            monster = monster[0]
+            dis = line_dis_from(agent, y, x)
+            if dis > 7:
+                return ret
+            break
+
+    for spell_name, energy_cost in attack_spells:
+        if agent.blstats.energy < energy_cost:
+            continue
+        if agent.character.spell_fail_chance.get(spell_name, 0) > 0.3:
+            continue
+        priority = 20
+        if dis == 1:
+            priority -= 8
+        if is_dangerous_monster(monster):
+            priority += 10
+        if monster[3].mname in WEAK_MONSTERS:
+            priority -= 8
+        ret.append((priority, ('cast', dy, dx, spell_name)))
+    return ret
 
 
 def elbereth_action(agent, monsters):
@@ -215,15 +248,12 @@ def elbereth_action(agent, monsters):
     if not agent.can_engrave():
         return []
     adj_monsters_count = 0
-    adj_ignoring_elbereth = False
     for monster in monsters:
         _, my, mx, mon, _ = monster
         if mon.mname in ONLY_RANGED_SLOW_MONSTERS:
             continue
         if not adjacent((my, mx), (agent.blstats.y, agent.blstats.x)):
             continue
-        if _ignores_elbereth(mon):
-            adj_ignoring_elbereth = True
         multiplier = np.clip(20 / agent.blstats.hitpoints, 1.0, 1.5)
         if is_monster_faster(agent, monster):
             multiplier *= 2
@@ -233,14 +263,6 @@ def elbereth_action(agent, monsters):
         adj_monsters_count += 1 * multiplier
         if is_dangerous_monster(monster):
             adj_monsters_count += 2 * multiplier
-
-    # hypothesis (continued): at critically low HP the melee priority (up to ~17)
-    # always outbid Elbereth, so the bot traded hits until it died even against
-    # monsters that Elbereth would scare away. When HP is critical and every
-    # adjacent attacker respects Elbereth, engraving must win outright.
-    if adj_monsters_count > 0 and not adj_ignoring_elbereth and \
-            agent.blstats.hitpoints <= max(6, agent.blstats.max_hitpoints // 3):
-        return [(25, ('elbereth',))]
 
     player_hp_ratio = (agent.blstats.hitpoints / agent.blstats.max_hitpoints) ** 0.5
     if agent.blstats.hitpoints < 30 and adj_monsters_count > 0:
@@ -283,6 +305,7 @@ def get_available_actions(agent, monsters):
                 actions.append((pri, ('ranged', dy, dx)))
 
             actions.extend(get_potential_wand_usages(agent, monsters, dy, dx))
+            actions.extend(get_potential_spell_usages(agent, monsters, dy, dx))
 
     to_pickup = decide_what_to_pickup(agent)
     if to_pickup:
@@ -358,7 +381,7 @@ def get_priorities(agent):
     priority -= priority[agent.blstats.y, agent.blstats.x]
 
     actions = get_available_actions(agent, monsters)
-    if not any(a[1][0] in ('melee', 'ranged') for a in actions):
+    if not any(a[1][0] in ('melee', 'ranged', 'zap', 'cast') for a in actions):
         actions.extend(goto_action(agent, priority, monsters))
     return priority, actions
 

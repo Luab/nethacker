@@ -273,6 +273,9 @@ class Character:
         self.skill_levels = np.zeros(max(self.name_to_skill_type.values()) + 1, dtype=int)
         self.upgradable_skills = dict()
 
+        self.known_spells = dict()
+        self.spell_fail_chance = dict()
+
         self.is_lycanthrope = False
 
     def update(self):
@@ -328,7 +331,7 @@ class Character:
         self.spell_fail_chance = dict()
 
         # TODO: parse for other spellcaster classes
-        if self.role not in (self.HEALER,):
+        if self.role not in (self.HEALER, self.WIZARD):
             return
 
         with self.agent.atom_operation():
@@ -352,6 +355,29 @@ class Character:
                 self.known_spells[spell_name] = letter
                 self.spell_fail_chance[spell_name] = int(fail) / 100
         self.agent.step(A.Command.ESC)
+
+    # hypothesis: the wizard's whole identity is its attack spells (force bolt,
+    # magic missile, ...). The bot never casts them, so it fights everything in
+    # melee with a quarterstaff and dies to weak monsters. Expose known attack
+    # spells (with their energy cost) so combat can cast them at range instead.
+    ATTACK_SPELLS = ['force bolt', 'magic missile', 'fireball', 'cone of cold',
+                     'finger of death', 'drain life']
+    SPELL_ENERGY_COST = {
+        'force bolt': 5,
+        'magic missile': 10,
+        'fireball': 15,
+        'cone of cold': 20,
+        'finger of death': 35,
+        'drain life': 10,
+    }
+
+    def get_attack_spells(self):
+        """ Return list of (spell_name, energy_cost) for known attack spells. """
+        ret = []
+        for name in self.ATTACK_SPELLS:
+            if name in self.known_spells:
+                ret.append((name, self.SPELL_ENERGY_COST.get(name, 10)))
+        return ret
 
     def parse_enhance_view(self):
         with self.agent.atom_operation():

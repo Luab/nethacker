@@ -779,6 +779,13 @@ class Agent:
         with self.atom_operation():
             dy, dx = direction
             direction = self.calc_direction(self.blstats.y, self.blstats.x, self.blstats.y + dy, self.blstats.x + dx)
+            direction_action = {
+                'n': A.CompassDirection.N, 's': A.CompassDirection.S,
+                'e': A.CompassDirection.E, 'w': A.CompassDirection.W,
+                'ne': A.CompassDirection.NE, 'se': A.CompassDirection.SE,
+                'nw': A.CompassDirection.NW, 'sw': A.CompassDirection.SW,
+                '.': A.MiscDirection.WAIT,
+            }[direction]
             success = [False]
 
             def type_letters():
@@ -795,7 +802,7 @@ class Agent:
                     yield ' '
                 if 'In what direction?' in self.message:
                     success[0] = True
-                    yield direction
+                    yield direction_action
 
             self.step(A.Command.CAST, type_letters())
             if success[0]:
@@ -1136,7 +1143,7 @@ class Agent:
                 actions = list(filter(lambda x: x[1][0] != 'ranged', actions))
 
             if allow_attack_all:
-                attack_actions = [a for a in actions if a[1][0] in ('melee', 'ranged', 'zap')]
+                attack_actions = [a for a in actions if a[1][0] in ('melee', 'ranged', 'zap', 'cast')]
                 if attack_actions:
                     actions = attack_actions
 
@@ -1216,6 +1223,10 @@ class Agent:
                 self.zap(wand, dir)
             return wait_counter
 
+        elif best_action[0] == 'cast':
+            _, dy, dx, spell_name = best_action
+            self.cast(spell_name, (dy, dx))
+            return wait_counter
         elif best_action[0] == 'pickup':
             if len(best_action) == 2:
                 _, items_to_pickup = best_action
@@ -1519,7 +1530,7 @@ class Agent:
                         ((Level.PLANE, 1), (None, None))  # TODO: check level num
                     self.character.parse()
                     self.character.parse_enhance_view()
-                    # self.character.parse_spellcast_view()
+                    self.character.parse_spellcast_view()
                     self.step(A.Command.AUTOPICKUP)
                     if 'Autopickup: ON' in self.message:
                         self.step(A.Command.AUTOPICKUP)
