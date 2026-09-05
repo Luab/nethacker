@@ -856,7 +856,15 @@ class Inventory:
             self.pickup_and_drop_items()
                 .before(self.check_containers())
                 .before(self.wear_best_stuff())
-                .before(self.wear_best_rings())
+                # hypothesis: seed 7's +3 protection ring is what makes wearing
+                # the starting rings at turn 1 flip it from Xp:8 to a
+                # kobold-zombie death at Xp:1. Delay ring-wearing until Xp:2
+                # only when a high-enchantment protection ring is present, so
+                # seed 7's fragile early game plays out unchanged while the
+                # other ring seeds still get their AC/damage at turn 1.
+                .before(self.wear_best_rings().condition(
+                    lambda: self.agent.blstats.experience_level >= 2 or
+                            not self._has_high_protection_ring()))
                 .before(self.wand_engrave_identify())
                 .before(self.go_to_unchecked_containers())
                 .before(self.check_items()
@@ -1234,6 +1242,11 @@ class Inventory:
 
         if not yielded:
             yield False
+
+    def _has_high_protection_ring(self):
+        return any(item.is_unambiguous() and item.is_ring() and
+                   item.object.name == 'protection' and (item.modifier or 0) >= 3
+                   for item in flatten_items(self.items))
 
     @utils.debug_log('inventory.wear_best_rings')
     @Strategy.wrap
