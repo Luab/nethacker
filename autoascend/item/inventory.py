@@ -259,6 +259,13 @@ class Inventory:
                 while not self.agent.single_popup or self.agent.single_popup[0] not in [
                     'Take out what type of objects?', 'Take out what?']:
                     assert ' inside, you are blasted by a ' not in self.agent.message, self.agent.message
+                    # hypothesis: taking from a bag that turns out to be empty
+                    # shows "The bag is empty.  Do what with it?" in the popup;
+                    # dismiss it instead of looping forever and crashing (seed 5).
+                    if ' is empty' in '\n'.join(self.agent.single_popup):
+                        if 'Do what with it?' in '\n'.join(self.agent.single_popup):
+                            yield 'q'
+                        return
                     assert self.agent.single_message or self.agent.single_popup, (self.agent.message, self.agent.popup)
                     yield ' '
                 if self.agent.single_popup[0] == 'Take out what type of objects?':
@@ -349,7 +356,14 @@ class Inventory:
             if '\no - ' not in '\n'.join(self.agent.single_popup):
                 # ':' sometimes doesn't display items correctly if there's >= 22 items (the first page isn't shown)
                 yield ':'
-                if ' is empty' in self.agent.single_message:
+                # hypothesis: an empty bag shows "The bag is empty.  Do what
+                # with it?" in the popup (not the message), which used to hit
+                # the assert below and crash the bot (seed 5). Dismiss the
+                # menu and treat the container as empty.
+                if ' is empty' in self.agent.single_message or \
+                        ' is empty' in '\n'.join(self.agent.single_popup):
+                    if 'Do what with it?' in '\n'.join(self.agent.single_popup):
+                        yield 'q'
                     return
                 # if self.agent.single_popup and 'Contents of ' in self.agent.single_popup[0]:
                 #     for text in self.agent.single_popup[1:]:
@@ -361,6 +375,13 @@ class Inventory:
 
             yield from 'o'
             if ' is empty' in self.agent.single_message and not self.agent.single_popup:
+                return
+            # hypothesis: taking from a bag that turns out to be empty shows
+            # "The bag is empty.  Do what with it?" in the popup; dismiss it
+            # instead of hitting the assert below (seed 5 crash).
+            if ' is empty' in '\n'.join(self.agent.single_popup):
+                if 'Do what with it?' in '\n'.join(self.agent.single_popup):
+                    yield 'q'
                 return
             if self.agent.single_popup and self.agent.single_popup[0] == 'Take out what type of objects?':
                 yield from 'a\r'

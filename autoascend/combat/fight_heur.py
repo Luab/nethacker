@@ -23,6 +23,12 @@ def melee_monster_priority(agent, monsters, monster):
         ret -= 17
     if 'were' in mon.mname:
         ret += 1
+    # hypothesis: once the bot has reached Xp:8 it no longer needs to farm XP,
+    # and meleeing dangerous monsters (soldier ants, wild dogs/cats) on the
+    # deeper levels is what gets it killed. Disengage from them so it explores
+    # and descends instead of trading hits with a soldier ant.
+    if is_dangerous_monster(monster) and agent.blstats.experience_level >= 8:
+        ret -= 20
     # if not wielding_melee_weapon(agent):
     #     ret -= 5
     if mon.mname in ONLY_RANGED_SLOW_MONSTERS:

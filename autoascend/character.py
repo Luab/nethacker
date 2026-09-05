@@ -323,6 +323,33 @@ class Character:
         self.race = self.name_to_race[race]
         self.gender = self.name_to_gender[gender]
 
+    def infer_known_spells(self):
+        """Populate known_spells / spell_fail_chance for a starting Wizard.
+
+        A Wizard starts knowing force bolt plus the spell of their second
+        starting spellbook, and both spellbooks are already identified in the
+        inventory.  The cast menu letters are deterministic for a starting
+        Wizard: 'a' is force bolt, 'b' is the second spell.  Inferring from
+        the inventory avoids opening the cast menu (which would shift turn
+        timing for every seed).
+        """
+        self.known_spells = dict()
+        self.spell_fail_chance = dict()
+        if self.role != self.WIZARD:
+            return
+
+        self.known_spells['force bolt'] = 'a'
+        self.spell_fail_chance['force bolt'] = 0.0
+        for item in self.agent.inventory.items:
+            if item.is_unambiguous() and item.category == nh.SPBOOK_CLASS and \
+                    item.object.name != 'force bolt':
+                spell = item.object.name
+                self.known_spells[spell] = 'b'
+                # Only the level-1 healing spell is reliable enough to cast;
+                # mark everything else as always-failing so it is never cast.
+                self.spell_fail_chance[spell] = 0.0 if spell == 'healing' else 1.0
+                break
+
     def parse_spellcast_view(self):
         self.known_spells = dict()
         self.spell_fail_chance = dict()

@@ -568,7 +568,15 @@ class Agent:
             assert mons.any()
 
             for mname in mnames:
-                glyph = MON.from_name(mname)
+                # hypothesis: messages like "Your scroll of destroy armor
+                # catches fire and burns!" are misparsed as a monster kill
+                # ("destroy" matches "destroys?"), producing a bogus monster
+                # name that crashes MON.from_name. Skip names that are not real
+                # monsters instead of crashing (seed 5).
+                try:
+                    glyph = MON.from_name(mname)
+                except AssertionError:
+                    continue
                 monster_id = glyph - nh.GLYPH_MON_OFF
                 corpse_glyph = MON.body_from_name(mname)
                 for y, x in zip(*utils.isin(mons, [glyph]).nonzero()):
@@ -1373,7 +1381,7 @@ class Agent:
 
     def should_cast_heal(self):
         # TODO: consider casting for other classes
-        if self.character.role != self.character.HEALER:
+        if self.character.role not in (self.character.HEALER, self.character.WIZARD):
             return False
         if 'healing' not in self.character.known_spells:
             return False
@@ -1409,10 +1417,10 @@ class Agent:
         #     self.cast('extra healing', direction=(0, 0))
         #     return
 
-        # if self.should_cast_heal():
-        #     yield True
-        #     self.cast('healing', direction=(0, 0))
-        #     return
+        if self.should_cast_heal():
+            yield True
+            self.cast('healing', direction=(0, 0))
+            return
 
         items = [item for item in flatten_items(self.inventory.items) if item.is_unambiguous() and
                  item.category == nh.POTION_CLASS and item.object.name in ['healing', 'extra healing', 'full healing']]
@@ -1528,6 +1536,12 @@ class Agent:
                 self.handle_exception(e)
 
             assert init_finished
+
+            # hypothesis: a Wizard starts knowing force bolt plus one random
+            # spell (often healing). Infer it from the already-identified
+            # starting spellbooks so the bot can cast healing when hurt,
+            # without opening the cast menu and shifting turn timing.
+            self.character.infer_known_spells()
 
             last_step = self.step_count
             inactivity_counter = 0
