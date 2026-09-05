@@ -176,6 +176,12 @@ class Item:
     def is_armor(self):
         return self.category == nh.ARMOR_CLASS
 
+    def is_ring(self):
+        return self.category == nh.RING_CLASS
+
+    def is_amulet(self):
+        return self.category == nh.AMULET_CLASS
+
     def get_ac(self):
         assert self.is_armor()
         return self.object.ac - (self.modifier if self.modifier is not None else 0)

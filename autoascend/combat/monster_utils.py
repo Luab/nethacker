@@ -15,17 +15,9 @@ def is_monster_faster(agent, monster):
 
 
 def imminent_death_on_melee(agent, monster):
-    # hypothesis: the bot fights to the death because it only retreats at a
-    # flat HP <= 8 (or <= 16 for a handful of "dangerous" monsters). Scale the
-    # retreat threshold with the monster's difficulty (a rough proxy for its
-    # damage output) and the player's max HP, so the bot disengages before a
-    # couple of hits can kill it instead of trading blows down to single-digit HP.
-    _, y, x, mon, _ = monster
-    threat = max(1, getattr(mon, 'difficulty', 1))
-    danger_hp = max(agent.blstats.max_hitpoints // 4, threat * 3)
     if is_dangerous_monster(monster):
-        danger_hp = max(danger_hp, agent.blstats.max_hitpoints // 3)
-    return agent.blstats.hitpoints <= danger_hp
+        return agent.blstats.hitpoints <= 16
+    return agent.blstats.hitpoints <= 8
 
 
 def is_dangerous_monster(monster):

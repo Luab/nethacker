@@ -635,6 +635,19 @@ class GlobalLogic:
             .preempt(self.agent, [
                 self.agent.fight2(),
             ])
+            # hypothesis: the wizard (and other foodless starts) starves because
+            # fight2 preempts corpse-eating whenever any monster is within 7 tiles,
+            # so the bot only eats once it is already fainting. Eat the nearest
+            # edible corpse *before* fighting, but only when actually hungry and
+            # with no adjacent monster, so it doesn't eat mid-melee (which the
+            # naive "eat before fight2" reorder showed gets the bot killed).
+            .preempt(self.agent, [
+                self.agent.eat_corpses_from_ground().every(5).condition(
+                    lambda: self.agent.blstats.hunger_state >= Hunger.HUNGRY and
+                            not any(utils.adjacent((m[1], m[2]), (self.agent.blstats.y, self.agent.blstats.x))
+                                    for m in self.agent.get_visible_monsters())
+                ),
+            ])
             .preempt(self.agent, [
                 self.agent.engulfed_fight(),
             ])

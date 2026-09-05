@@ -19,6 +19,9 @@ class InventoryItems:
         self.boots = None
         self.cloak = None
         self.shirt = None
+        self.left_ring = None
+        self.right_ring = None
+        self.amulet = None
 
         self.total_weight = 0
 
@@ -111,6 +114,17 @@ class InventoryItems:
                             assert getattr(self, name) is None, ((name, getattr(self, name), item), str(self), iterable)
                             setattr(self, name, item)
                             break
+                    else:
+                        if item.is_ring():
+                            if 'on right hand' in (item.text or ''):
+                                assert self.right_ring is None, (item, str(self))
+                                self.right_ring = item
+                            elif 'on left hand' in (item.text or ''):
+                                assert self.left_ring is None, (item, str(self))
+                                self.left_ring = item
+                        elif item.is_amulet():
+                            assert self.amulet is None, (item, str(self))
+                            self.amulet = item
 
                 if item.is_possible_container() or (item.is_container() and self._recheck_containers):
                     self.agent.inventory.check_container_content(item)

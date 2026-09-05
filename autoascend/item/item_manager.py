@@ -285,7 +285,8 @@ class ItemManager:
         ) = matches[0]
         # TODO: effects, uses
 
-        if info in {'being worn', 'being worn; slippery', 'wielded', 'chained to you'} or info.startswith(
+        if info in {'being worn', 'being worn; slippery', 'wielded', 'chained to you',
+                    'on right hand', 'on left hand', 'around your neck'} or info.startswith(
                 'weapon in ') or \
                 info.startswith('tethered weapon in '):
             equipped = True

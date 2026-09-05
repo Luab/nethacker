@@ -165,6 +165,36 @@ class Inventory:
 
         return True
 
+    def put_on(self, item, smart=True):
+        assert item is not None
+
+        if smart:
+            item = self.move_to_inventory(item)
+        letter = self.items.get_letter(item)
+
+        if item.equipped:
+            return True
+
+        with self.agent.atom_operation():
+            self.agent.step(A.Command.PUTON)
+            if "Don't even bother." in self.agent.message:
+                return False
+            assert 'What do you want to put on?' in self.agent.message, self.agent.message
+            self.agent.type_text(letter)
+            if item.is_ring() and 'Which ring-finger' in self.agent.message:
+                if self.items.left_ring is None:
+                    finger = 'l'
+                elif self.items.right_ring is None:
+                    finger = 'r'
+                else:
+                    return False
+                self.agent.type_text(finger)
+            assert 'on right hand' in self.agent.message or 'on left hand' in self.agent.message or \
+                   'being worn' in self.agent.message or 'around your neck' in self.agent.message, \
+                   self.agent.message
+
+        return True
+
     def takeoff(self, item):
         # TODO: smart
 
@@ -826,6 +856,7 @@ class Inventory:
             self.pickup_and_drop_items()
                 .before(self.check_containers())
                 .before(self.wear_best_stuff())
+                .before(self.wear_best_rings())
                 .before(self.wand_engrave_identify())
                 .before(self.go_to_unchecked_containers())
                 .before(self.check_items()
@@ -1197,6 +1228,51 @@ class Inventory:
                         break
                     assert best_armorset[slot] is not None
                     self.wear(best_armorset[slot])
+                    break
+            else:
+                break
+
+        if not yielded:
+            yield False
+
+    @utils.debug_log('inventory.wear_best_rings')
+    @Strategy.wrap
+    def wear_best_rings(self):
+        # hypothesis: the wizard starts with two rings but the bot never puts
+        # them on, so it misses free AC/damage. Put on uncursed/blessed combat
+        # rings (protection / gain strength / increase damage / increase
+        # accuracy) and amulets, up to two rings + one amulet. Restricting to
+        # combat rings avoids the timing-shift regressions that wearing every
+        # starting ring (e.g. fire resistance, gain constitution) caused.
+        good_rings = {'protection', 'gain strength', 'increase damage', 'increase accuracy'}
+        yielded = False
+        while 1:
+            for item in flatten_items(self.items):
+                if not item.is_unambiguous():
+                    continue
+                if item.status not in (Item.UNCURSED, Item.BLESSED):
+                    continue
+                if item.is_ring():
+                    if item.equipped:
+                        continue
+                    if item.object.name not in good_rings:
+                        continue
+                    if self.items.left_ring is not None and self.items.right_ring is not None:
+                        continue
+                    if not yielded:
+                        yielded = True
+                        yield True
+                    self.put_on(item)
+                    break
+                elif item.is_amulet():
+                    if item.equipped:
+                        continue
+                    if self.items.amulet is not None:
+                        continue
+                    if not yielded:
+                        yielded = True
+                        yield True
+                    self.put_on(item)
                     break
             else:
                 break
