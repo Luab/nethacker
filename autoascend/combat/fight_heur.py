@@ -240,6 +240,32 @@ def wait_action(agent, monsters):
     return []
 
 
+def defensive_self_zap_action(agent, monsters):
+    # hypothesis: a Wizard facing a wererat in melee (which ignores Elbereth
+    # in human form and can summon rats / infect lycanthropy) should self-zap
+    # a wand of make invisible so the monster can no longer see it, instead of
+    # trading blows and dying. Only do it when there is no pet to lose track of
+    # the invisible hero, or once the hero is strong enough (Xp>=7) that the
+    # defensive buff is worth the pet disruption.
+    if agent.invisible:
+        return []
+    wand = None
+    for item in agent.inventory.items:
+        if item.is_unambiguous() and item.is_wand() and \
+                item.object.name == 'make invisible' and item.uses != 'no charges':
+            wand = item
+            break
+    if wand is None:
+        return []
+    for monster in monsters:
+        _, my, mx, mon, _ = monster
+        if not adjacent((my, mx), (agent.blstats.y, agent.blstats.x)):
+            continue
+        if mon.mname == 'wererat' and (not agent.has_pet or agent.blstats.experience_level >= 7):
+            return [(200, ('zap_self', wand))]
+    return []
+
+
 def get_available_actions(agent, monsters):
     actions = []
 
@@ -274,6 +300,7 @@ def get_available_actions(agent, monsters):
 
     actions.extend(elbereth_action(agent, monsters))
     actions.extend(wait_action(agent, monsters))
+    actions.extend(defensive_self_zap_action(agent, monsters))
 
     return actions
 

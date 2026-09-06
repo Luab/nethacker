@@ -77,6 +77,7 @@ class Agent:
         self._allow_attack_all_turn = -float('inf')
 
         self.last_cast_fail_turn = defaultdict(lambda: -float('inf'))
+        self.invisible = False
 
         self.stats_logger = StatsLogger()
 
@@ -467,6 +468,11 @@ class Agent:
         self._is_updating_state = True
         message = self.message
         popup = self.popup
+
+        if "can't see yourself" in message:
+            self.invisible = True
+        elif 'You can see yourself again' in message:
+            self.invisible = False
 
         try:
             if allow_update:
@@ -1222,6 +1228,11 @@ class Agent:
             with self.env.debug_tiles([[my, mx] for my, mx, _ in targeted_monsters],
                                       (255, 0, 255, 255), mode='frame'):
                 self.zap(wand, dir)
+            return wait_counter
+
+        elif best_action[0] == 'zap_self':
+            _, wand = best_action
+            self.zap(wand, '.')
             return wait_counter
 
         elif best_action[0] == 'pickup':
