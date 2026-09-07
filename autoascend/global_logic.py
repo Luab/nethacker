@@ -525,8 +525,14 @@ class GlobalLogic:
                 level = (Level.SOKOBAN, 4)
 
             elif self.milestone == Milestone.FIND_GNOMISH_MINES:
-                condition = lambda: self.agent.current_level().dungeon_number == Level.GNOMISH_MINES
-                level = (Level.GNOMISH_MINES, 1)
+                # hypothesis: for a gnomish hero the Gnomish Mines are the
+                # safest fast source of depth (native gnomes/dwarves are
+                # peaceful), and depth is what the progression score rewards.
+                # Descend straight to Mines End instead of stopping at the
+                # entrance, so the bot banks the depth before the Sokoban
+                # detour.
+                condition = lambda: self.agent.current_level().key() == (Level.GNOMISH_MINES, 9)
+                level = (Level.GNOMISH_MINES, 9)
 
             # elif self.milestone == Milestone.FIND_LIGHT_GNOMISH_MINES:
             #     condition = lambda: self.agent.current_level().dungeon_number == Level.GNOMISH_MINES \
