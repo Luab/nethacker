@@ -10,7 +10,7 @@ from nle.nethack import actions as A
 from autoascend import objects as O, utils
 from autoascend.character import Character
 from autoascend.exceptions import AgentPanic
-from autoascend.glyph import G
+from autoascend.glyph import G, Hunger
 from autoascend.item import ItemManager, Item, ContainerContent, check_if_triggered_container_trap, \
     find_equivalent_item, flatten_items
 from autoascend.item.inventory_items import InventoryItems
@@ -1279,6 +1279,20 @@ class Inventory:
         # combat rings avoids the timing-shift regressions that wearing every
         # starting ring (e.g. fire resistance, gain constitution) caused.
         good_rings = {'protection', 'gain strength', 'increase damage', 'increase accuracy'}
+        # A Wizard starves more than the melee classes this bot was written for;
+        # a ring of slow digestion directly addresses that. Only put it on once
+        # actually hungry so the early game stays bit-identical.
+        if self.agent.character.role == Character.WIZARD and \
+                self.agent.blstats.hunger_state >= Hunger.WEAK:
+            good_rings.add('slow digestion')
+        # hypothesis: a Wizard's uncursed ring of regeneration is free HP
+        # recovery, but wearing it early shifts turn timing and starves the
+        # bot (seed 14). Only wear it once the bot is strong (Xp>=7) and
+        # actually hurt, so it helps the late Uruk-hai fight without touching
+        # the fragile early game.
+        if self.agent.blstats.experience_level >= 7 and \
+                self.agent.blstats.hitpoints < self.agent.blstats.max_hitpoints:
+            good_rings.add('regeneration')
         yielded = False
         while 1:
             for item in flatten_items(self.items):
