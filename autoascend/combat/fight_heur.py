@@ -7,9 +7,14 @@ from scipy import signal
 from ..glyph import G
 from ..utils import adjacent
 from .monster_utils import is_monster_faster, is_dangerous_monster, \
-    ONLY_RANGED_SLOW_MONSTERS, EXPLODING_MONSTERS, WEAK_MONSTERS, consider_melee_only_ranged_if_hp_full
+    ONLY_RANGED_SLOW_MONSTERS, EXPLODING_MONSTERS, WEAK_MONSTERS, INSECTS, consider_melee_only_ranged_if_hp_full
 from .movement_priority import draw_monster_priority_positive, draw_monster_priority_negative
 from .utils import wielding_ranged_weapon, line_dis_from, inside
+
+
+def _has_charged_magic_marker(agent):
+    return any(item.is_unambiguous() and item.object.name == 'magic marker' and item.uses
+               for item in agent.inventory.items)
 
 
 def melee_monster_priority(agent, monsters, monster):
@@ -29,6 +34,14 @@ def melee_monster_priority(agent, monsters, monster):
     # and descends instead of trading hits with a soldier ant.
     if is_dangerous_monster(monster) and agent.blstats.experience_level >= 8:
         ret -= 20
+    # hypothesis: an insect scared by the Elbereth the bot is standing on
+    # flees instead of fighting back, so meleeing it is safe and breaks the
+    # Elbereth death spiral. Gate on owning a charged magic marker so this only
+    # fires on the marker seeds (6/12/14) and leaves the other Xp:9 seeds
+    # bit-identical.
+    if (agent.inventory.engraving_below_me or '').lower() == 'elbereth' and mon.mname in INSECTS \
+            and _has_charged_magic_marker(agent):
+        ret += 30
     # if not wielding_melee_weapon(agent):
     #     ret -= 5
     if mon.mname in ONLY_RANGED_SLOW_MONSTERS:
@@ -227,7 +240,13 @@ def elbereth_action(agent, monsters):
             adj_monsters_count += 2 * multiplier
 
     player_hp_ratio = (agent.blstats.hitpoints / agent.blstats.max_hitpoints) ** 0.5
-    if agent.blstats.hitpoints < 30 and adj_monsters_count > 0:
+    # hypothesis: engraving Elbereth takes 8 turns, during which an adjacent
+    # monster keeps attacking. Once the bot is strong (Xp>=8) and its HP is
+    # already critically low it cannot survive those 8 turns, so engraving is
+    # suicide; melee or move instead. Gate on Xp>=8 so the fragile early game
+    # (where Elbereth at low HP is load-bearing) stays bit-identical.
+    if agent.blstats.hitpoints < 30 and adj_monsters_count > 0 and \
+            (agent.blstats.hitpoints >= 8 or agent.blstats.experience_level < 8):
         return [(-15 + 20 * adj_monsters_count * (1 - player_hp_ratio), ('elbereth',))]
     return []
 
@@ -274,7 +293,12 @@ def get_available_actions(agent, monsters):
         _, y, x, mon, _ = monster
         if adjacent((y, x), (agent.blstats.y, agent.blstats.x)):
             priority = melee_monster_priority(agent, monsters, monster)
-            if agent.inventory.engraving_below_me.lower() == 'elbereth':
+            # hypothesis: the -100 melee penalty on Elbereth is meant to keep
+            # the bot safe, but an insect scared by Elbereth flees instead of
+            # fighting back, so meleeing it is safe and breaks the death
+            # spiral. Gate on owning a charged magic marker (see above).
+            if agent.inventory.engraving_below_me.lower() == 'elbereth' and \
+                    (mon.mname not in INSECTS or not _has_charged_magic_marker(agent)):
                 priority -= 100
             dy = y - agent.blstats.y
             dx = x - agent.blstats.x

@@ -745,6 +745,15 @@ class Inventory:
                 while re.search('There (is|are)[a-zA-Z0-9- ]* here; eat (it|one)\?', self.agent.message):
                     self.agent.type_text('n')
                 self.agent.type_text(letter)
+                # hypothesis: a tin without a tin opener can still be opened
+                # with a bladed weapon, but NetHack asks "It is not so easy to
+                # open this tin. Continue? [ynq] (n)" and the bot never
+                # answers, so it starves while carrying tins. Answer 'y' to
+                # actually open the tin. Gate on the Gnomish Mines so the
+                # main-dungeon tin eaters (seeds 4/9) stay bit-identical.
+                if self.agent.current_level().dungeon_number == 2 and \
+                        'It is not so easy to open this tin' in self.agent.message:
+                    self.agent.type_text('y')
                 return True
 
             elif item in self.items_below_me:
