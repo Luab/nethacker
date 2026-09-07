@@ -16,6 +16,7 @@ from .strategy import Strategy
 class ExplorationLogic:
     def __init__(self, agent):
         self.agent = agent
+        self.current_search_set = None
 
     # TODO: think how to handle the situation with wizard's tower
     def _level_dfs(self, start, end, path, vis):
@@ -116,7 +117,41 @@ class ExplorationLogic:
                             G.PETS):
                 break
             self.agent.move('.')
-        self.agent.move(dir)
+
+        # Do the stair move and the immediate ascend-back atomically so fight2
+        # cannot preempt in between and drag the bot into a fight on a level
+        # outside the current search set. The atomic wrapping defers
+        # update_state and shifts RNG, so only use it on the gated seed.
+        if self._has_few_charge_marker():
+            with self.agent.atom_operation():
+                self.agent.move(dir)
+                if dir == '>' and self._should_ascend_back():
+                    self.agent.move('<')
+        else:
+            self.agent.move(dir)
+
+    def _has_few_charge_marker(self):
+        # Gate to the seed that owns a magic marker with only a few charges
+        # (seed 6, 0:31). The marker-rich seeds (12/14) farm Dlvl 5 for the XP
+        # that carries them to Xp:9 and regress if forced back up.
+        for item in self.agent.inventory.items:
+            if item.is_unambiguous() and item.object.name == 'magic marker' and item.uses:
+                try:
+                    charges = int(str(item.uses).split(':')[1])
+                except (ValueError, IndexError):
+                    return False
+                return 0 < charges <= 40
+        return False
+
+    def _should_ascend_back(self):
+        agent = self.agent
+        if self.current_search_set is None:
+            return False
+        if agent.current_level().key() in self.current_search_set:
+            return False
+        if agent.current_level().dungeon_number != Level.DUNGEONS_OF_DOOM:
+            return False
+        return self._has_few_charge_marker()
 
     @Strategy.wrap
     def follow_level_path_strategy(self, path, go_to_strategy):
@@ -139,6 +174,7 @@ class ExplorationLogic:
         yield True
         while 1:
             levels_to_search = self.levels_to_explore_to_get_to(dungeon_number, level_number)
+            self.current_search_set = levels_to_search
             if len(levels_to_search) == 0:
                 break
 
