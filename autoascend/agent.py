@@ -9,6 +9,7 @@ import numpy as np
 from nle.nethack import actions as A
 
 from . import combat
+from . import objects as O
 from . import utils
 from .character import Character
 from .exceptions import AgentPanic, AgentFinished, AgentChangeStrategy
@@ -104,7 +105,7 @@ class Agent:
             self._no_step_calls = False
 
     @contextlib.contextmanager
-    def atom_operation(self, allow_update=False):
+    def atom_operation(self, allow_update=False, allow_callbacks=True):
         assert not self._no_step_calls
         if self.turns_in_atom_operation is not None:
             # already in an atom operation
@@ -128,7 +129,7 @@ class Agent:
             self.turns_in_atom_operation = None
             self._atom_operation_allow_update = None
 
-        self.update_state()
+        self.update_state(allow_callbacks=allow_callbacks)
 
     @contextlib.contextmanager
     def panic_if_position_changes(self):
@@ -791,8 +792,28 @@ class Agent:
 
     def cast(self, spell_name, direction):
         with self.atom_operation():
+            # Re-read the cast menu to get the current fail chance and retention
+            # (armour and intelligence change them). Nested inside this
+            # atom_operation, so it does not trigger preempt checks.
+            self.character.ensure_spells_parsed(force=True)
+            if self.character.spell_fail_chance.get(spell_name, 1.0) > 0.5:
+                self.last_cast_fail_turn[spell_name] = self._last_turn
+                self.stats_logger.log_event(f'cast_fail_{spell_name}')
+                return False
+            if self.character.spell_retention.get(spell_name, '100%') == '(gone)':
+                self.last_cast_fail_turn[spell_name] = self._last_turn
+                self.stats_logger.log_event(f'cast_fail_{spell_name}')
+                return False
+
             dy, dx = direction
             direction = self.calc_direction(self.blstats.y, self.blstats.x, self.blstats.y + dy, self.blstats.x + dx)
+            direction_action = {
+                'n': A.CompassDirection.N, 's': A.CompassDirection.S,
+                'e': A.CompassDirection.E, 'w': A.CompassDirection.W,
+                'ne': A.CompassDirection.NE, 'se': A.CompassDirection.SE,
+                'nw': A.CompassDirection.NW, 'sw': A.CompassDirection.SW,
+                '.': A.MiscDirection.WAIT,
+            }[direction]
             success = [False]
 
             def type_letters():
@@ -806,10 +827,13 @@ class Agent:
                 for _ in range(3):
                     if 'In what direction?' in self.message:
                         break
+                    if 'too impaired' in self.message or 'enough energy' in self.message or \
+                            'fail to cast' in self.message:
+                        return
                     yield ' '
                 if 'In what direction?' in self.message:
                     success[0] = True
-                    yield direction
+                    yield direction_action
 
             self.step(A.Command.CAST, type_letters())
             if success[0]:
@@ -817,6 +841,7 @@ class Agent:
             else:
                 self.last_cast_fail_turn[spell_name] = self._last_turn
                 self.stats_logger.log_event(f'cast_fail_{spell_name}')
+            return success[0]
 
     def kick(self, y, x=None):
         with self.panic_if_position_changes():
@@ -893,6 +918,21 @@ class Agent:
             return False  # TODO: only for handless monsters (which cannot write)
         return (self.blstats.y, self.blstats.x) != self._forbidden_engrave_position
 
+    def _engraving_tool_letter(self):
+        # Engraving Elbereth with a hard ring makes a semi-permanent floor
+        # engraving that erodes 1/26 per scare, instead of a dust engraving
+        # that erodes 100% per scare. Only switch once the bot is at the
+        # Xp:8+ stage where the Elbereth death spiral happens; earlier the
+        # fingertip keeps the fragile early game bit-identical.
+        if self.blstats.experience_level < 8:
+            return '-'
+        hard_materials = {O.IRON, O.METAL, O.COPPER, O.SILVER, O.PLATINUM,
+                          O.MITHRIL, O.GLASS, O.GEMSTONE, O.MINERAL}
+        for item in self.inventory.items:
+            if item.is_ring() and item.is_unambiguous() and item.objs[0].metal in hard_materials:
+                return self.inventory.items.get_letter(item)
+        return '-'
+
     def engrave(self, text):
         assert '\r' not in text
         ret = False
@@ -903,12 +943,13 @@ class Agent:
                 self._forbidden_engrave_position = (self.blstats.y, self.blstats.x)
                 yield A.Command.ESC
                 return
-            yield '-'
+            yield self._engraving_tool_letter()
             if 'Do you want to add to the current engraving?' in self.single_message:
                 yield 'n'
             while self._observation['misc'][2]:
                 yield ' '
-            if 'What do you want to write in the dust here?' not in self.single_message:
+            if 'What do you want to write in the dust here?' not in self.single_message and \
+                    'What do you want to engrave in the' not in self.single_message:
                 self._forbidden_engrave_position = (self.blstats.y, self.blstats.x)
                 yield A.Command.ESC
                 return
@@ -1141,7 +1182,9 @@ class Agent:
                 yielded = True
                 yield True
                 self.character.parse_enhance_view()
-                # self.character.parse_spellcast_view()
+                # Spell names/letters are parsed once at init; the current fail
+                # chance is re-read inside cast() right before casting.
+                self.character.ensure_spells_parsed()
 
             move_priority_heatmap, actions = combat.fight_heur.get_priorities(self)
             actions.extend(combat.fight_heur.get_move_actions(self, dis, move_priority_heatmap))
@@ -1150,7 +1193,7 @@ class Agent:
                 actions = list(filter(lambda x: x[1][0] != 'ranged', actions))
 
             if allow_attack_all:
-                attack_actions = [a for a in actions if a[1][0] in ('melee', 'ranged', 'zap')]
+                attack_actions = [a for a in actions if a[1][0] in ('melee', 'ranged', 'zap', 'cast')]
                 if attack_actions:
                     actions = attack_actions
 
@@ -1233,6 +1276,13 @@ class Agent:
         elif best_action[0] == 'zap_self':
             _, wand = best_action
             self.zap(wand, '.')
+            return wait_counter
+
+        elif best_action[0] == 'cast':
+            _, spell_name, dy, dx, targeted_monsters = best_action
+            with self.env.debug_tiles([[my, mx] for my, mx, _ in targeted_monsters],
+                                      (255, 0, 255, 255), mode='frame'):
+                self.cast(spell_name, (dy, dx))
             return wait_counter
 
         elif best_action[0] == 'pickup':
@@ -1549,10 +1599,9 @@ class Agent:
             assert init_finished
 
             # hypothesis: a Wizard starts knowing force bolt plus one random
-            # spell (often healing). Infer it from the already-identified
-            # starting spellbooks so the bot can cast healing when hurt,
-            # without opening the cast menu and shifting turn timing.
-            self.character.infer_known_spells()
+            # spell (often healing). Read the cast menu once to learn the real
+            # spell letters and failure chances; opening it costs no game turns.
+            self.character.ensure_spells_parsed()
 
             last_step = self.step_count
             inactivity_counter = 0

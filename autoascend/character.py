@@ -275,6 +275,12 @@ class Character:
 
         self.is_lycanthrope = False
 
+        self.known_spells = dict()
+        self.spell_fail_chance = dict()
+        self.spell_retention = dict()
+        self._spells_parsed = False
+        self._last_spell_parse_turn = -float('inf')
+
     def update(self):
         if 'You feel feverish.' in self.agent.message:
             self.is_lycanthrope = True
@@ -324,61 +330,80 @@ class Character:
         self.gender = self.name_to_gender[gender]
 
     def infer_known_spells(self):
-        """Populate known_spells / spell_fail_chance for a starting Wizard.
+        """Fallback: populate known_spells from the starting inventory.
 
-        A Wizard starts knowing force bolt plus the spell of their second
-        starting spellbook, and both spellbooks are already identified in the
-        inventory.  The cast menu letters are deterministic for a starting
-        Wizard: 'a' is force bolt, 'b' is the second spell.  Inferring from
-        the inventory avoids opening the cast menu (which would shift turn
-        timing for every seed).
+        Only used when the cast menu cannot be read.  Records spell names and
+        menu letters but leaves non-force-bolt fail chances at a conservative
+        0.5 so no spell is cast on a guess.
         """
         self.known_spells = dict()
         self.spell_fail_chance = dict()
+        self.spell_retention = dict()
         if self.role != self.WIZARD:
             return
 
         self.known_spells['force bolt'] = 'a'
         self.spell_fail_chance['force bolt'] = 0.0
+        self.spell_retention['force bolt'] = '100%'
         for item in self.agent.inventory.items:
             if item.is_unambiguous() and item.category == nh.SPBOOK_CLASS and \
                     item.object.name != 'force bolt':
                 spell = item.object.name
                 self.known_spells[spell] = 'b'
-                # Only the level-1 healing spell is reliable enough to cast;
-                # mark everything else as always-failing so it is never cast.
-                self.spell_fail_chance[spell] = 0.0 if spell == 'healing' else 1.0
+                self.spell_fail_chance[spell] = 0.5
+                self.spell_retention[spell] = '100%'
                 break
+
+    def ensure_spells_parsed(self, force=False):
+        """Read the cast menu once (lazily) to learn real spell fail chances.
+
+        Opening the menu and dismissing it costs no game turns, so this is safe
+        to call from a strategy's execution phase.  It must not be called from
+        a strategy condition (those run under disallow_step_calling).
+        """
+        if self._spells_parsed and not force:
+            return
+        if self.role not in (self.HEALER, self.WIZARD):
+            self._spells_parsed = True
+            return
+        try:
+            self.parse_spellcast_view()
+            self._spells_parsed = True
+        except Exception:
+            self.infer_known_spells()
+            self._spells_parsed = True
 
     def parse_spellcast_view(self):
         self.known_spells = dict()
         self.spell_fail_chance = dict()
+        self.spell_retention = dict()
 
-        # TODO: parse for other spellcaster classes
-        if self.role not in (self.HEALER,):
+        if self.role not in (self.HEALER, self.WIZARD):
             return
 
-        with self.agent.atom_operation():
+        with self.agent.atom_operation(allow_callbacks=False):
             self.agent.step(A.Command.CAST)
             if not self.agent.popup:
                 self.known_spells[self.agent.message] = None
-                return
-            if self.agent.popup[0] not in ('Choose which spell to cast') or \
+            elif self.agent.popup[0] not in ('Choose which spell to cast') or \
                     not self.agent.popup[1].startswith('Name'):
                 raise ValueError(f'Invalid cast popup text format: {self.agent.popup}')
-            for line in self.agent.popup[2:]:
-                matches = re.findall(r'^([a-zA-Z]) - *' +
-                                     r'(' + '|'.join(ALL_SPELL_NAMES) + ') *' +
-                                     r'([0-9]*) *' +
-                                     r'(' + '|'.join(ALL_SPELL_CATEGORIES) + ') *' +
-                                     r'([0-9]*)\% *' +
-                                     r'([0-9]*\%|\(gone\))', line)
-                assert len(matches) == 1, (matches, line)
-                letter, spell_name, level, category, fail, retention = matches[0]
-                assert len(letter) == 1, letter
-                self.known_spells[spell_name] = letter
-                self.spell_fail_chance[spell_name] = int(fail) / 100
-        self.agent.step(A.Command.ESC)
+            else:
+                for line in self.agent.popup[2:]:
+                    matches = re.findall(r'^([a-zA-Z]) - *' +
+                                         r'(' + '|'.join(ALL_SPELL_NAMES) + ') *' +
+                                         r'([0-9]*) *' +
+                                         r'(' + '|'.join(ALL_SPELL_CATEGORIES) + ') *' +
+                                         r'([0-9]*)\% *' +
+                                         r'([0-9]*\%|\(gone\))', line)
+                    assert len(matches) == 1, (matches, line)
+                    letter, spell_name, level, category, fail, retention = matches[0]
+                    assert len(letter) == 1, letter
+                    self.known_spells[spell_name] = letter
+                    self.spell_fail_chance[spell_name] = int(fail) / 100
+                    self.spell_retention[spell_name] = retention
+            self.agent.step(A.Command.ESC)
+        self._last_spell_parse_turn = self.agent.blstats.time
 
     def parse_enhance_view(self):
         with self.agent.atom_operation():

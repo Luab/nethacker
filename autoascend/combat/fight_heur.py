@@ -217,6 +217,64 @@ def get_potential_wand_usages(agent, monsters, dy, dx):
     return ret
 
 
+def get_potential_spell_usages(agent, monsters, dy, dx):
+    """Return cast actions for the Wizard's force bolt spell.
+
+    Force bolt is a level-1 attack spell the Wizard always starts with: a 2d12
+    beam (average 13 damage) for 5 energy.  It is reserved for the insects that
+    most often kill this bot (giant/soldier/fire ants, killer bees) and only
+    when melee would be lethal, so it does not rewrite the early game for every
+    seed.
+    """
+    ret = []
+    if agent.character.role != agent.character.WIZARD:
+        return ret
+    if 'force bolt' not in agent.character.known_spells:
+        return ret
+    if agent.blstats.energy < 5:
+        return ret
+    if agent.character.spell_fail_chance.get('force bolt', 1.0) > 0.5:
+        return ret
+    # Spell knowledge expires after 20,000 turns; the cast menu marks such a
+    # spell with "(gone)" retention and casting it confuses/stuns the hero.
+    if agent.character.spell_retention.get('force bolt', '100%') == '(gone)':
+        return ret
+    if agent.blstats.time >= 20000:
+        return ret
+    # A confused, stunned or blind caster cannot cast reliably.
+    if agent.character.prop.confusion or agent.character.prop.stun or agent.character.prop.blind:
+        return ret
+    # Desperate measure only: cast when melee against a dangerous insect would
+    # be lethal (imminent_death_on_melee uses HP <= 16 for dangerous monsters).
+    if agent.blstats.hitpoints > 16:
+        return ret
+
+    targeted_monsters = set()
+    y, x = agent.blstats.y + dy, agent.blstats.x + dx
+    for _ in range(13):
+        if not inside(agent, y, x) or not agent.current_level().walkable[y, x]:
+            break
+        monster = [m for m in monsters if m[1] == y and m[2] == x]
+        if monster:
+            m = monster[0]
+            _, my, mx, mon, _ = m
+            if mon.mname in INSECTS:
+                targeted_monsters.add((y, x, m))
+            break
+        if agent.glyphs[y, x] in G.PETS:
+            break
+        y += dy
+        x += dx
+
+    if targeted_monsters:
+        # High enough to beat melee (16) and the Elbereth wait action at low
+        # HP.  Casting erases Elbereth (3.6), but at HP <= 16 against an insect
+        # this is the same trade attempt 10 already accepted for meleeing
+        # insects on Elbereth.
+        ret.append((25, ('cast', 'force bolt', dy, dx, targeted_monsters)))
+    return ret
+
+
 def elbereth_action(agent, monsters):
     if agent.inventory.engraving_below_me.lower() == 'elbereth':
         return []
@@ -317,6 +375,7 @@ def get_available_actions(agent, monsters):
                 actions.append((pri, ('ranged', dy, dx)))
 
             actions.extend(get_potential_wand_usages(agent, monsters, dy, dx))
+            actions.extend(get_potential_spell_usages(agent, monsters, dy, dx))
 
     to_pickup = decide_what_to_pickup(agent)
     if to_pickup:
